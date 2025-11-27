@@ -67,8 +67,14 @@ func HandleMint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// B. Save to SQLite
-	res, _ := db.Exec("INSERT INTO products (name, token_id, tx_hash) VALUES (?, ?, ?)", name, tokenID, txHash)
-	id, _ := res.LastInsertId()
+	// FIX: We just execute the insert. We don't need the 'id' returned by LastInsertId
+	// because we are using the 'tokenID' for tracking in this system.
+	_, dbErr := db.Exec("INSERT INTO products (name, token_id, tx_hash) VALUES (?, ?, ?)", name, tokenID, txHash)
+	if dbErr != nil {
+		log.Println("DB Insert Error:", dbErr)
+		http.Error(w, "Database Insert Failed", 500)
+		return
+	}
 
 	// C. Generate QR Code
 	png, _ := qrcode.Encode(tokenID, qrcode.Medium, 256)

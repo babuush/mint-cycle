@@ -1,0 +1,201 @@
+{{define "content"}}
+<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+<div class="max-w-xl mx-auto">
+  <!-- Header -->
+  <div class="text-center mb-6">
+    <h1 class="text-2xl font-bold tracking-tight text-gray-900">
+      POS Terminal
+    </h1>
+    <p class="text-sm text-gray-500">Optical Scanner Active</p>
+  </div>
+
+  <div
+    class="bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden relative"
+  >
+    <!-- Mode Switcher -->
+    <div class="grid grid-cols-2 text-sm font-medium border-b border-gray-100">
+      <button
+        onclick="setMode('sell')"
+        id="btn-sell"
+        class="py-4 text-center transition-all bg-gray-50 text-gray-400 hover:bg-gray-100"
+      >
+        💰 SELL
+      </button>
+      <button
+        onclick="setMode('recycle')"
+        id="btn-recycle"
+        class="py-4 text-center transition-all bg-gray-50 text-gray-400 hover:bg-gray-100"
+      >
+        ♻️ RECYCLE
+      </button>
+    </div>
+
+    <!-- Scanner Viewport -->
+    <div class="p-6 bg-gray-50">
+      <div
+        class="relative rounded-lg overflow-hidden bg-black shadow-inner border border-gray-300 aspect-square max-w-xs mx-auto"
+      >
+        <div id="reader" class="w-full h-full"></div>
+
+        <!-- Custom Scanner Overlay -->
+        <div
+          class="absolute inset-0 pointer-events-none flex items-center justify-center"
+        >
+          <div class="w-48 h-48 border-2 border-white/50 rounded-lg relative">
+            <div
+              class="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-white"
+            ></div>
+            <div
+              class="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-white"
+            ></div>
+            <div
+              class="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-white"
+            ></div>
+            <div
+              class="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-white"
+            ></div>
+            <!-- Scanning line animation -->
+            <div
+              class="absolute top-0 left-0 right-0 h-0.5 bg-red-500/80 shadow-[0_0_10px_rgba(239,68,68,0.8)] animate-[scan_2s_infinite]"
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dynamic Feedback Box -->
+      <div
+        id="scan-feedback"
+        class="mt-4 bg-white rounded-lg border border-gray-200 p-4 min-h-[100px] flex items-center justify-center text-center shadow-sm"
+      >
+        <div class="text-sm text-gray-500 animate-pulse">
+          Waiting for QR code...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden Logic -->
+  <form
+    id="form-sell"
+    hx-post="/sell"
+    hx-target="#scan-feedback"
+    hx-swap="innerHTML"
+    class="hidden"
+  >
+    <input type="hidden" name="token_id" id="input-sell-token" />
+  </form>
+  <form
+    id="form-recycle"
+    hx-post="/recycle"
+    hx-target="#scan-feedback"
+    hx-swap="innerHTML"
+    class="hidden"
+  >
+    <input type="hidden" name="token_id" id="input-recycle-token" />
+  </form>
+</div>
+
+<style>
+  @keyframes scan {
+    0% {
+      top: 10%;
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    90% {
+      opacity: 1;
+    }
+    100% {
+      top: 90%;
+      opacity: 0;
+    }
+  }
+</style>
+
+<script>
+  let currentMode = "sell";
+  let html5QrcodeScanner;
+
+  function setMode(mode) {
+    currentMode = mode;
+    const btnSell = document.getElementById("btn-sell");
+    const btnRecycle = document.getElementById("btn-recycle");
+    const feedback = document.getElementById("scan-feedback");
+
+    // Reset feedback
+    feedback.innerHTML =
+      '<div class="text-sm text-gray-500 animate-pulse">Waiting for QR code...</div>';
+
+    // Styling classes
+    const activeClass =
+      "bg-white text-black border-t-2 border-black shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10";
+    const inactiveClass =
+      "bg-gray-50 text-gray-400 hover:bg-gray-100 border-t-2 border-transparent";
+
+    if (mode === "sell") {
+      btnSell.className = `py-4 text-center transition-all ${activeClass}`;
+      btnRecycle.className = `py-4 text-center transition-all ${inactiveClass}`;
+    } else {
+      btnSell.className = `py-4 text-center transition-all ${inactiveClass}`;
+      btnRecycle.className = `py-4 text-center transition-all ${activeClass} !border-green-500 !text-green-700`;
+    }
+  }
+
+  function onScanSuccess(decodedText, decodedResult) {
+    if (!html5QrcodeScanner) return;
+
+    html5QrcodeScanner.pause(true);
+    console.log(`Scanned: ${decodedText}`);
+
+    if (currentMode === "sell") {
+      document.getElementById("input-sell-token").value = decodedText;
+      htmx.trigger("#form-sell", "submit");
+    } else {
+      document.getElementById("input-recycle-token").value = decodedText;
+      htmx.trigger("#form-recycle", "submit");
+    }
+
+    // Wait longer (3.5s) before allowing next scan to give time for HTMX to show result
+    setTimeout(() => {
+      html5QrcodeScanner.resume();
+    }, 3500);
+  }
+
+  function initScanner() {
+    if (typeof Html5QrcodeScanner === "undefined") {
+      setTimeout(initScanner, 200);
+      return;
+    }
+
+    // Clean previous instance
+    if (html5QrcodeScanner) {
+      try {
+        html5QrcodeScanner.clear();
+      } catch (e) {}
+    }
+
+    try {
+      html5QrcodeScanner = new Html5QrcodeScanner(
+        "reader",
+        { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
+        /* verbose= */ false,
+      );
+      html5QrcodeScanner.render(onScanSuccess, (err) => {
+        /* ignore scan errors */
+      });
+
+      // Set initial state
+      setMode("sell");
+    } catch (err) {
+      console.error("Scanner Error:", err);
+      document.getElementById("scan-feedback").innerHTML =
+        '<p class="text-red-500">Camera permission denied</p>';
+    }
+  }
+
+  initScanner();
+</script>
+{{end}}

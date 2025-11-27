@@ -1,0 +1,88 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="en" class="antialiased">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProvenanceOS | {{.Title}}</title>
+    
+    <!-- Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { 
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f9fafb',
+                            100: '#f3f4f6',
+                            900: '#111827',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- HTMX & Tools -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+    <style>
+        .scroller::-webkit-scrollbar { height: 6px; width: 6px; }
+        .scroller::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
+        .scroller::-webkit-scrollbar-track { background: transparent; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 flex flex-col min-h-screen">
+
+    <!-- Navbar -->
+    <nav class="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                <div class="flex items-center gap-3">
+                    <div class="h-8 w-8 bg-black rounded-lg flex items-center justify-center shadow-lg">
+                        <span class="text-white font-bold text-lg">P</span>
+                    </div>
+                    <a href="/" class="font-bold text-lg tracking-tight text-gray-900 hover:text-gray-700">ProvenanceOS</a>
+                </div>
+
+                <div class="flex space-x-1 sm:space-x-4">
+                    <a href="/" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors {{if eq .Title "Dashboard"}}bg-gray-100 text-black{{else}}text-gray-500{{end}}">
+                        Dashboard
+                    </a>
+                    <a href="/pos" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors {{if eq .Title "Point of Sale"}}bg-gray-100 text-black{{else}}text-gray-500{{end}}">
+                        POS Terminal
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {{template "content" .}}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 mt-auto">
+        <div class="max-w-7xl mx-auto py-6 px-4 flex justify-between items-center text-xs text-gray-400">
+            <p>&copy; 2025 ProvenanceOS.</p>
+            <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                <span>System Operational</span>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>
+{{end}}

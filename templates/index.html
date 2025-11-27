@@ -1,0 +1,181 @@
+{{define "content"}}
+<div class="flex flex-col lg:flex-row gap-8">
+  <!-- LEFT: MINTING ENGINE -->
+  <div class="w-full lg:w-1/3 flex flex-col gap-6">
+    <div
+      class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
+    >
+      <div class="bg-gray-900 px-6 py-4 flex justify-between items-center">
+        <h2 class="text-white font-semibold text-sm uppercase tracking-wider">
+          🏭 Factory Output
+        </h2>
+      </div>
+
+      <div class="p-6">
+        <p class="text-sm text-gray-500 mb-6">
+          Create a digital twin. This interacts with the Ethereum blockchain to
+          mint a unique ERC-721 token.
+        </p>
+
+        <form
+          hx-post="/mint"
+          hx-target="#mint-result"
+          hx-swap="innerHTML"
+          class="space-y-4"
+        >
+          <div>
+            <label
+              class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2"
+              >Item Name / SKU</label
+            >
+            <input
+              type="text"
+              name="name"
+              class="block w-full rounded-lg border-gray-300 bg-gray-50 border p-3 text-sm focus:border-black focus:ring-black transition-colors"
+              placeholder="e.g. FW24 Leather Jacket"
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            class="w-full bg-black text-white font-medium py-3 rounded-lg hover:bg-gray-800 transition-all flex justify-center items-center gap-2 shadow-lg shadow-gray-200"
+          >
+            <span>Mint Asset</span>
+          </button>
+        </form>
+
+        <!-- Dynamic Result Area -->
+        <div id="mint-result" class="mt-6 empty:hidden"></div>
+      </div>
+    </div>
+
+    <!-- Network Status -->
+    <div
+      class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between"
+    >
+      <div>
+        <p class="text-xs text-gray-400 uppercase font-semibold">Network</p>
+        <p class="font-bold text-gray-900">Polygon Amoy</p>
+      </div>
+      <div class="text-right">
+        <p class="text-xs text-gray-400 uppercase font-semibold">Status</p>
+        <p
+          class="text-xs font-mono bg-green-100 text-green-700 px-2 py-1 rounded inline-block mt-1"
+        >
+          Connected
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: DATA LEDGER -->
+  <div class="w-full lg:w-2/3">
+    <div
+      class="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-full"
+    >
+      <div
+        class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-t-xl"
+      >
+        <h2 class="font-semibold text-gray-800">Global Inventory Ledger</h2>
+        <button
+          onclick="window.location.reload()"
+          class="text-xs text-gray-500 hover:text-black"
+        >
+          Refresh ⟳
+        </button>
+      </div>
+
+      <div class="overflow-x-auto scroller p-2">
+        <table class="w-full text-left text-sm whitespace-nowrap">
+          <thead>
+            <tr class="text-xs text-gray-400 border-b border-gray-100">
+              <th class="px-4 py-3 font-medium uppercase tracking-wider w-1/3">
+                Product
+              </th>
+              <th class="px-4 py-3 font-medium uppercase tracking-wider w-1/4">
+                Status
+              </th>
+              <th class="px-4 py-3 font-medium uppercase tracking-wider w-1/3">
+                Token ID
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-50">
+            {{range .Data}}
+            <!-- Added HTMX attributes here to make row clickable -->
+            <tr
+              hx-get="/product/{{.TokenID}}"
+              hx-target="#mint-result"
+              hx-swap="innerHTML"
+              class="hover:bg-blue-50 transition-colors group cursor-pointer border-b border-gray-50 last:border-0"
+            >
+              <td class="px-4 py-3 font-medium text-gray-900">{{.Name}}</td>
+              <td class="px-4 py-3">
+                {{if eq .Status "MANUFACTURED"}}
+                <span
+                  class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100 ring-1 ring-blue-100"
+                >
+                  In Stock
+                </span>
+                {{else if eq .Status "SOLD"}}
+                <span
+                  class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-100 ring-1 ring-amber-100"
+                >
+                  Sold
+                </span>
+                {{else}}
+                <span
+                  class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 border border-green-100 ring-1 ring-green-100"
+                >
+                  Recycled
+                </span>
+                {{end}}
+              </td>
+              <td class="px-4 py-3">
+                <code
+                  class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded font-mono"
+                >
+                  {{.TokenID}}
+                </code>
+              </td>
+            </tr>
+            {{else}}
+            <tr>
+              <td
+                colspan="3"
+                class="px-4 py-12 text-center text-gray-400 italic"
+              >
+                No records found. Start minting!
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Specific styles for the mint result box */
+  #mint-result div {
+    animation: slideDown 0.3s ease-out;
+  }
+  #mint-result p,
+  #mint-result code {
+    word-break: break-all;
+    overflow-wrap: break-word;
+  }
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+</style>
+{{end}}

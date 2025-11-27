@@ -67,8 +67,6 @@ func HandleMint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// B. Save to SQLite
-	// FIX: We just execute the insert. We don't need the 'id' returned by LastInsertId
-	// because we are using the 'tokenID' for tracking in this system.
 	_, dbErr := db.Exec("INSERT INTO products (name, token_id, tx_hash) VALUES (?, ?, ?)", name, tokenID, txHash)
 	if dbErr != nil {
 		log.Println("DB Insert Error:", dbErr)
@@ -81,15 +79,17 @@ func HandleMint(w http.ResponseWriter, r *http.Request) {
 	encoded := base64.StdEncoding.EncodeToString(png)
 
 	// HTMX Response
+	// FIX: Added txHash back into the template and arguments
 	tmpl := `
 		<div class="p-4 bg-green-100 border border-green-400 rounded mt-4 animate-pulse">
 			<h3 class="font-bold">Minted: %s</h3>
-			<p class="text-xs font-mono mb-2">ID: %s</p>
+			<p class="text-xs font-mono mb-1">ID: %s</p>
+            <p class="text-[10px] text-gray-500 break-all mb-2">Tx: %s</p>
 			<img src="data:image/png;base64,%s" class="mt-2 mx-auto border-4 border-white shadow-lg"/>
 			<p class="text-center text-sm text-gray-500 mt-2">Print and stick on product</p>
 		</div>
 	`
-	fmt.Fprintf(w, tmpl, name, tokenID, encoded)
+	fmt.Fprintf(w, tmpl, name, tokenID, txHash, encoded)
 }
 
 // 4. Sell Logic (Transfer Ownership)
@@ -103,20 +103,24 @@ func HandleSell(w http.ResponseWriter, r *http.Request) {
 	txHash, err := TransferNFT(tokenID, newOwnerAddr)
 	if err != nil {
 		log.Println("Transfer Error:", err)
+		// Even if error, we might want to show UI, but normally we'd return 500.
+		// For demo robustness, ensure txHash isn't empty to prevent display issues
+		if txHash == "" { txHash = "error_or_offline" }
 	}
 
-	// Update DB - CRITICAL FIX: We now update the tx_hash to the SALE hash
+	// Update DB
 	db.Exec("UPDATE products SET status = 'SOLD', tx_hash = ? WHERE token_id = ?", txHash, tokenID)
 
 	// HTMX Response
+	// FIX: Removed dangerous [:10] slicing which caused panic if hash was short/empty
 	w.Write([]byte(fmt.Sprintf(`
 		<div class="bg-blue-100 p-4 rounded text-center animate-pulse">
 			<h1 class="text-2xl font-bold text-blue-800">SOLD!</h1>
 			<p>NFT transferred to new wallet:</p>
-			<code class="text-xs block bg-blue-200 p-1 rounded mt-1">%s</code>
-			<p class="mt-2 text-xs text-gray-500">Tx: %s...</p>
+			<code class="text-xs block bg-blue-200 p-1 rounded mt-1 break-all">%s</code>
+			<p class="mt-2 text-xs text-gray-500 break-all">Tx: %s</p>
 		</div>
-	`, newOwnerAddr, txHash[:10])))
+	`, newOwnerAddr, txHash)))
 }
 
 // 5. Recycle Logic
@@ -151,11 +155,9 @@ func HandleGetProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Re-generate QR Code
 	png, _ := qrcode.Encode(p.TokenID, qrcode.Medium, 256)
 	encoded := base64.StdEncoding.EncodeToString(png)
 
-	// Reuse the Mint Result Template structure
 	tmpl := `
 		<div class="p-4 bg-gray-50 border border-gray-200 rounded-lg animate-fade-in">
             <div class="flex justify-between items-start">

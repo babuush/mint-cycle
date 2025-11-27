@@ -8,13 +8,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5" // Add this import
+	"github.com/go-chi/chi/v5"
 	"github.com/skip2/go-qrcode"
 )
 
 // Helper to parse templates
 func render(w http.ResponseWriter, tmpl string, data PageData) {
-	// We parse both the layout and the specific page template
 	t, err := template.ParseFiles("templates/layout.html", "templates/"+tmpl)
 	if err != nil {
 		log.Println("Template Parse Error:", err)
@@ -22,7 +21,6 @@ func render(w http.ResponseWriter, tmpl string, data PageData) {
 		return
 	}
 
-	// EXECUTE "layout" - This matches {{define "layout"}} in layout.html
 	err = t.ExecuteTemplate(w, "layout", data)
 	if err != nil {
 		log.Println("Template Execute Error:", err)
@@ -63,8 +61,8 @@ func HandleMint(w http.ResponseWriter, r *http.Request) {
 	txHash, tokenID, err := MintNFTToWarehouse(name)
 	if err != nil {
 		log.Println("Minting failed:", err)
-		// Fallback for demo if blockchain fails
-		tokenID = fmt.Sprintf("%d", time.Now().Unix())
+		// Fallback for demo
+		tokenID = fmt.Sprintf("%d", time.Now().UnixMicro())
 		txHash = "0x_mock_hash_offline"
 	}
 
@@ -72,20 +70,20 @@ func HandleMint(w http.ResponseWriter, r *http.Request) {
 	res, _ := db.Exec("INSERT INTO products (name, token_id, tx_hash) VALUES (?, ?, ?)", name, tokenID, txHash)
 	id, _ := res.LastInsertId()
 
-	// C. Generate QR Code (The physical link)
+	// C. Generate QR Code
 	png, _ := qrcode.Encode(tokenID, qrcode.Medium, 256)
 	encoded := base64.StdEncoding.EncodeToString(png)
 
 	// HTMX Response
 	tmpl := `
-		<div class="p-4 bg-green-100 border border-green-400 rounded mt-4">
-			<h3 class="font-bold">Minted: %s (ID: %d)</h3>
-			<p class="text-xs">Tx: %s</p>
+		<div class="p-4 bg-green-100 border border-green-400 rounded mt-4 animate-pulse">
+			<h3 class="font-bold">Minted: %s</h3>
+			<p class="text-xs font-mono mb-2">ID: %s</p>
 			<img src="data:image/png;base64,%s" class="mt-2 mx-auto border-4 border-white shadow-lg"/>
 			<p class="text-center text-sm text-gray-500 mt-2">Print and stick on product</p>
 		</div>
 	`
-	fmt.Fprintf(w, tmpl, name, id, txHash, encoded)
+	fmt.Fprintf(w, tmpl, name, tokenID, encoded)
 }
 
 // 4. Sell Logic (Transfer Ownership)
@@ -99,21 +97,20 @@ func HandleSell(w http.ResponseWriter, r *http.Request) {
 	txHash, err := TransferNFT(tokenID, newOwnerAddr)
 	if err != nil {
 		log.Println("Transfer Error:", err)
-		// We continue even if blockchain fails for the demo flow, or you can return http.Error
 	}
 
-	// Update DB
-	db.Exec("UPDATE products SET status = 'SOLD' WHERE token_id = ?", tokenID)
+	// Update DB - CRITICAL FIX: We now update the tx_hash to the SALE hash
+	db.Exec("UPDATE products SET status = 'SOLD', tx_hash = ? WHERE token_id = ?", txHash, tokenID)
 
 	// HTMX Response
 	w.Write([]byte(fmt.Sprintf(`
 		<div class="bg-blue-100 p-4 rounded text-center animate-pulse">
 			<h1 class="text-2xl font-bold text-blue-800">SOLD!</h1>
-			<p>NFT #%s transferred to</p>
-			<code class="text-xs">%s</code>
-			<p class="mt-2 text-xs">Tx: %s</p>
+			<p>NFT transferred to new wallet:</p>
+			<code class="text-xs block bg-blue-200 p-1 rounded mt-1">%s</code>
+			<p class="mt-2 text-xs text-gray-500">Tx: %s...</p>
 		</div>
-	`, tokenID, newOwnerAddr, txHash)))
+	`, newOwnerAddr, txHash[:10])))
 }
 
 // 5. Recycle Logic
@@ -124,7 +121,7 @@ func HandleRecycle(w http.ResponseWriter, r *http.Request) {
 	rowsAff, _ := res.RowsAffected()
 
 	if rowsAff == 0 {
-		w.Write([]byte(`<div class="bg-red-100 p-2 text-red-700">Invalid Item or Not Sold Yet</div>`))
+		w.Write([]byte(`<div class="bg-red-100 p-2 text-red-700 font-bold text-center">Invalid Item or Not Sold Yet</div>`))
 		return
 	}
 
@@ -152,7 +149,7 @@ func HandleGetProduct(w http.ResponseWriter, r *http.Request) {
 	png, _ := qrcode.Encode(p.TokenID, qrcode.Medium, 256)
 	encoded := base64.StdEncoding.EncodeToString(png)
 
-	// Reuse the Mint Result Template structure so it looks consistent
+	// Reuse the Mint Result Template structure
 	tmpl := `
 		<div class="p-4 bg-gray-50 border border-gray-200 rounded-lg animate-fade-in">
             <div class="flex justify-between items-start">
@@ -164,10 +161,12 @@ func HandleGetProduct(w http.ResponseWriter, r *http.Request) {
 			<img src="data:image/png;base64,%s" class="mt-4 mx-auto border-4 border-white shadow-lg"/>
 			
             <div class="mt-4 text-center">
-                <p class="text-xs text-gray-400 mb-1">Blockchain Tx:</p>
-                <code class="text-[10px] text-gray-500 bg-gray-100 p-1 rounded block break-all">%s</code>
+                <p class="text-xs text-gray-400 mb-1">Latest Blockchain Tx:</p>
+                <a href="https://amoy.polygonscan.com/tx/%s" target="_blank" class="text-[10px] text-blue-500 hover:underline bg-blue-50 p-1 rounded block break-all cursor-pointer" title="View on PolygonScan">
+                    %s
+                </a>
             </div>
 		</div>
 	`
-	fmt.Fprintf(w, tmpl, p.Name, p.Status, p.TokenID, encoded, p.TxHash)
+	fmt.Fprintf(w, tmpl, p.Name, p.Status, p.TokenID, encoded, p.TxHash, p.TxHash)
 }

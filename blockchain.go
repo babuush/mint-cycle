@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"log"
 	"math/big"
 	"os"
 	"strings"
+	"time"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -23,8 +24,8 @@ var (
 	parsedABI        abi.ABI
 )
 
-// ABI Updated to include 'currentTokenId' view function
-const erc721ABI = `[{"constant":true,"inputs":[],"name":"currentTokenId","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"},{"name":"tokenId","type":"uint256"}],"name":"transferFrom","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"}],"name":"mint","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]`
+// FIXED ABI: transferFrom now correctly expects 3 arguments (from, to, tokenId)
+const erc721ABI = `[{"constant":false,"inputs":[{"name":"from","type":"address"},{"name":"to","type":"address"},{"name":"tokenId","type":"uint256"}],"name":"transferFrom","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"},{"name":"id","type":"uint256"}],"name":"mint","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"}]`
 
 func initBlockchain() {
 	rpcURL := os.Getenv("RPC_URL")
@@ -32,14 +33,16 @@ func initBlockchain() {
 	cAddr := os.Getenv("CONTRACT_ADDRESS")
 
 	if rpcURL == "" || privKeyHex == "" {
-		log.Println("Blockchain env vars missing. Running in OFFLINE mode.")
+		log.Println("⚠️ Blockchain env vars missing. Running in OFFLINE mode.")
 		return
 	}
 
 	var err error
 	client, err = ethclient.Dial(rpcURL)
 	if err != nil {
-		log.Fatal("Failed to connect to eth client:", err)
+		log.Println("⚠️ Failed to connect to eth client, running offline:", err)
+		client = nil
+		return
 	}
 
 	warehousePrivKey, err = crypto.HexToECDSA(privKeyHex)
@@ -50,31 +53,18 @@ func initBlockchain() {
 	contractAddress = common.HexToAddress(cAddr)
 	parsedABI, _ = abi.JSON(strings.NewReader(erc721ABI))
 
-	log.Println("Blockchain connected. Contract:", cAddr)
+	log.Println("✅ Blockchain connected. Contract:", cAddr)
 }
 
 func MintNFTToWarehouse(productName string) (string, string, error) {
+	// 1. GENERATE ID: We create the ID based on time (Microseconds)
+	uniqueID := fmt.Sprintf("%d", time.Now().UnixMicro())
+
 	if client == nil {
-		return "0x_mock_tx", "999", nil
+		return "0x_mock_tx_offline_" + uniqueID, uniqueID, nil
 	}
 
-	// 1. READ: Get the current Token ID from the contract to keep DB in sync
-	// We call the 'currentTokenId' view function
-	var currentId big.Int
-	callData, _ := parsedABI.Pack("currentTokenId")
-	msg := ethereum.CallMsg{To: &contractAddress, Data: callData}
-	output, err := client.CallContract(context.Background(), msg, nil)
-	
-	tokenID := big.NewInt(1) // Default if call fails
-	if err == nil {
-		parsedABI.UnpackIntoInterface(&currentId, "currentTokenId", output)
-		// The next ID will be current + 1
-		tokenID.Add(&currentId, big.NewInt(1))
-	} else {
-        log.Println("Warning: Could not fetch token ID, using prediction", err)
-    }
-
-	// 2. WRITE: Prepare Mint Transaction
+	// 2. PREPARE BLOCKCHAIN WRITE
 	publicKey := warehousePrivKey.Public()
 	publicKeyECDSA, _ := publicKey.(*ecdsa.PublicKey)
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
@@ -83,9 +73,15 @@ func MintNFTToWarehouse(productName string) (string, string, error) {
 	gasPrice, _ := client.SuggestGasPrice(context.Background())
 	chainID, _ := client.NetworkID(context.Background())
 
-	data, err := parsedABI.Pack("mint", fromAddress)
+	// Convert our string ID to Big Int for the contract
+	tokenIDBig := new(big.Int)
+	tokenIDBig.SetString(uniqueID, 10)
+
+	// We pack "mint" with TWO arguments: (to, id)
+	data, err := parsedABI.Pack("mint", fromAddress, tokenIDBig)
 	if err != nil {
-		return "", "", err
+		log.Println("Pack Error:", err)
+		return "", uniqueID, err
 	}
 
 	tx := types.NewTransaction(nonce, contractAddress, big.NewInt(0), 300000, gasPrice, data)
@@ -93,10 +89,11 @@ func MintNFTToWarehouse(productName string) (string, string, error) {
 
 	err = client.SendTransaction(context.Background(), signedTx)
 	if err != nil {
-		return "", "", err
+		log.Println("⚠️ WRITE FAILED:", err)
+		return "0x_failed_tx", uniqueID, nil 
 	}
 
-	return signedTx.Hash().Hex(), tokenID.String(), nil
+	return signedTx.Hash().Hex(), uniqueID, nil
 }
 
 func TransferNFT(tokenIDStr string, toHex string) (string, error) {
@@ -116,7 +113,7 @@ func TransferNFT(tokenIDStr string, toHex string) (string, error) {
 	gasPrice, _ := client.SuggestGasPrice(context.Background())
 	chainID, _ := client.NetworkID(context.Background())
 
-	// transferFrom(from, to, tokenId)
+	// transferFrom(from, to, tokenId) - Correctly passes 3 arguments now
 	data, err := parsedABI.Pack("transferFrom", fromAddress, toAddress, tokenID)
 	if err != nil {
 		return "", err
@@ -126,7 +123,11 @@ func TransferNFT(tokenIDStr string, toHex string) (string, error) {
 	signedTx, _ := types.SignTx(tx, types.NewEIP155Signer(chainID), warehousePrivKey)
 
 	err = client.SendTransaction(context.Background(), signedTx)
-	return signedTx.Hash().Hex(), err
+	if err != nil {
+		return "", err
+	}
+	
+	return signedTx.Hash().Hex(), nil
 }
 
 func CreateGuestWallet() string {

@@ -3,13 +3,12 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
-	"fmt"
 	"log"
 	"math/big"
 	"os"
 	"strings"
-	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -24,8 +23,8 @@ var (
 	parsedABI        abi.ABI
 )
 
-// Minimal ABI for ERC721 interaction
-const erc721ABI = `[{"constant":false,"inputs":[{"name":"to","type":"address"},{"name":"tokenId","type":"uint256"}],"name":"transferFrom","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"}],"name":"mint","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]`
+// ABI Updated to include 'currentTokenId' view function
+const erc721ABI = `[{"constant":true,"inputs":[],"name":"currentTokenId","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"},{"name":"tokenId","type":"uint256"}],"name":"transferFrom","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"}],"name":"mint","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]`
 
 func initBlockchain() {
 	rpcURL := os.Getenv("RPC_URL")
@@ -55,14 +54,27 @@ func initBlockchain() {
 }
 
 func MintNFTToWarehouse(productName string) (string, string, error) {
-	// Generate a Unique ID based on time (Microseconds)
-	// This ensures every QR code is unique immediately, even before the blockchain confirms it.
-	uniqueID := fmt.Sprintf("%d", time.Now().UnixMicro())
-
 	if client == nil {
-		return "0x_mock_tx_" + uniqueID, uniqueID, nil // Mock
+		return "0x_mock_tx", "999", nil
 	}
 
+	// 1. READ: Get the current Token ID from the contract to keep DB in sync
+	// We call the 'currentTokenId' view function
+	var currentId big.Int
+	callData, _ := parsedABI.Pack("currentTokenId")
+	msg := ethereum.CallMsg{To: &contractAddress, Data: callData}
+	output, err := client.CallContract(context.Background(), msg, nil)
+	
+	tokenID := big.NewInt(1) // Default if call fails
+	if err == nil {
+		parsedABI.UnpackIntoInterface(&currentId, "currentTokenId", output)
+		// The next ID will be current + 1
+		tokenID.Add(&currentId, big.NewInt(1))
+	} else {
+        log.Println("Warning: Could not fetch token ID, using prediction", err)
+    }
+
+	// 2. WRITE: Prepare Mint Transaction
 	publicKey := warehousePrivKey.Public()
 	publicKeyECDSA, _ := publicKey.(*ecdsa.PublicKey)
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
@@ -71,16 +83,12 @@ func MintNFTToWarehouse(productName string) (string, string, error) {
 	gasPrice, _ := client.SuggestGasPrice(context.Background())
 	chainID, _ := client.NetworkID(context.Background())
 
-	// Packing the data for "mint(address)"
 	data, err := parsedABI.Pack("mint", fromAddress)
 	if err != nil {
 		return "", "", err
 	}
 
-	// Create transaction
 	tx := types.NewTransaction(nonce, contractAddress, big.NewInt(0), 300000, gasPrice, data)
-	
-	// Sign transaction
 	signedTx, _ := types.SignTx(tx, types.NewEIP155Signer(chainID), warehousePrivKey)
 
 	err = client.SendTransaction(context.Background(), signedTx)
@@ -88,23 +96,13 @@ func MintNFTToWarehouse(productName string) (string, string, error) {
 		return "", "", err
 	}
 
-	// RETURN THE UNIQUE ID
-	// Note: Ideally we wait for the receipt to get the *actual* On-Chain ID, 
-	// but for this "Boring" synchronous app, we use our generated Unique ID 
-	// to track the item in the database and QR code.
-	return signedTx.Hash().Hex(), uniqueID, nil
+	return signedTx.Hash().Hex(), tokenID.String(), nil
 }
 
 func TransferNFT(tokenIDStr string, toHex string) (string, error) {
 	if client == nil {
 		return "0x_mock_transfer", nil
 	}
-
-	// Note: If using the timestamp ID strategy above with a contract that auto-increments,
-	// this Transfer will fail on-chain because the IDs won't match.
-	// 
-	// FOR A REAL SYSTEM: You would query the contract events to map "TxHash" -> "Real Token ID".
-	// FOR THIS DEMO: We assume the tokenIDStr passed here is valid for the call.
 	
 	tokenID := new(big.Int)
 	tokenID.SetString(tokenIDStr, 10)
@@ -132,7 +130,6 @@ func TransferNFT(tokenIDStr string, toHex string) (string, error) {
 }
 
 func CreateGuestWallet() string {
-	// Generate a new keypair for the customer on the fly
 	key, _ := crypto.GenerateKey()
 	pub := key.Public()
 	pubECDSA, _ := pub.(*ecdsa.PublicKey)
